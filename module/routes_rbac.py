@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from chacc_api import BackboneContext
 from pydantic import BaseModel
 from sqlalchemy import func, or_, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import joinedload, selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from chacc_authentication.module.auth import get_current_user, get_current_user_required
@@ -251,7 +251,7 @@ async def get_roles(
     db: AsyncSession = Depends(get_async_db),
 ):
     """List roles with privileges (server-side pagination + search)."""
-    stmt = select(Role)
+    stmt = select(Role).options(selectinload(Role.privileges))
     if search:
         like = f"%{search}%"
         stmt = stmt.where(
@@ -460,7 +460,7 @@ async def get_user_privileges(
     redis_client = await get_redis_client()
     rbac = get_rbac_service(db, redis_client)
 
-    target = _resolve_user(user_uuid, db)
+    target = await _resolve_user(user_uuid, db)
     if not await rbac.has_privilege(current_user.id, "READ_USER_PRIVILEGES"):
         # Users can only view their own privileges
         if current_user.id != target.id:
@@ -484,7 +484,7 @@ async def get_user_roles(
     redis_client = await get_redis_client()
     rbac = get_rbac_service(db, redis_client)
 
-    target = _resolve_user(user_uuid, db)
+    target = await _resolve_user(user_uuid, db)
     if not await rbac.has_privilege(current_user.id, "READ_USER_PRIVILEGES"):
         if current_user.id != target.id:
             raise HTTPException(
@@ -508,7 +508,7 @@ async def get_user_direct_privileges(
     redis_client = await get_redis_client()
     rbac = get_rbac_service(db, redis_client)
 
-    target = _resolve_user(user_uuid, db)
+    target = await _resolve_user(user_uuid, db)
     if not await rbac.has_privilege(current_user.id, "READ_USER_PRIVILEGES"):
         if current_user.id != target.id:
             raise HTTPException(
@@ -537,7 +537,7 @@ async def assign_role_to_user(
             detail="Missing required privilege: WRITE_USER_ROLES",
         )
 
-    target = _resolve_user(user_uuid, db)
+    target = await _resolve_user(user_uuid, db)
     success = await rbac.assign_role_to_user(target.id, request.role_name)
     if not success:
         raise HTTPException(status_code=404, detail="User or role not found")
@@ -562,7 +562,7 @@ async def remove_role_from_user(
             detail="Missing required privilege: WRITE_USER_ROLES",
         )
 
-    target = _resolve_user(user_uuid, db)
+    target = await _resolve_user(user_uuid, db)
     success = await rbac.remove_role_from_user(target.id, request.role_name)
     if not success:
         raise HTTPException(status_code=404, detail="User or role not found")
@@ -587,7 +587,7 @@ async def assign_direct_privilege_to_user(
             detail="Missing required privilege: WRITE_USER_PRIVILEGES",
         )
 
-    target = _resolve_user(user_uuid, db)
+    target = await _resolve_user(user_uuid, db)
     success = await rbac.assign_direct_privilege_to_user(
         target.id, request.privilege_name
     )
@@ -616,7 +616,7 @@ async def remove_direct_privilege_from_user(
             detail="Missing required privilege: WRITE_USER_PRIVILEGES",
         )
 
-    target = _resolve_user(user_uuid, db)
+    target = await _resolve_user(user_uuid, db)
     success = await rbac.remove_direct_privilege_from_user(
         target.id, request.privilege_name
     )
