@@ -190,7 +190,7 @@ async def refresh_token(
         refresh_token=refresh_token,
         token_type="bearer",
         expires_in=access_token_expire_minutes * 60,
-        expires_at=expires_at.isoformat(),
+        access_token_expires_at=expires_at.isoformat(),
         access_token_expiry=access_token_expire_minutes * 60,
         refresh_token_expiry=refresh_token_expiry,
     )
