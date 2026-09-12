@@ -160,7 +160,7 @@ async def refresh_token(
     if redis_service:
         redis_client = await redis_service.get_client()
 
-    access_token_expire_minutes, refresh_token_expire_days = (
+    access_token_expire_minutes, refresh_token_expire_minutes = (
         await get_token_expiry_settings(context)
     )
 
@@ -183,7 +183,7 @@ async def refresh_token(
     expires_at = datetime.now(timezone.utc) + expires_delta
     access_token, refresh_token, session_uuid = result
 
-    refresh_token_expiry = refresh_token_expire_days * 24 * 60 * 60
+    refresh_token_expiry = refresh_token_expire_minutes * 60
 
     return Token(
         access_token=access_token,
