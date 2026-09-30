@@ -86,10 +86,6 @@ async def setup_plugin(context: Optional[BackboneContext] = None):
     )
     _module_context.register_service("has_privileges", has_privileges)
 
-    _module_context.register_service(
-        "privilege_service", PrivilegeService(_module_context)
-    )
-
     await initialize_rbac_defaults(_module_context)
 
     await create_default_user(_module_context)

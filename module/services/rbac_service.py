@@ -68,6 +68,11 @@ class RBACService:
         result = await self.db.execute(select(Privilege))
         return result.scalars().all()
 
+    async def get_privilege_names(self) -> List[str]:
+        """Get the names of all privileges."""
+        result = await self.db.execute(select(Privilege.name))
+        return [row[0] for row in result.all()]
+
     async def create_privilege(
         self, name: str, description: str, severity: str
     ) -> Privilege:
@@ -127,14 +132,32 @@ class RBACService:
         )
         return result.scalars().all()
 
+    async def get_role_names(self) -> List[str]:
+        """Get the names of all roles."""
+        result = await self.db.execute(select(Role.name))
+        return [row[0] for row in result.all()]
+
     async def create_role(
-        self, name: str, description: str, is_system: bool = False
+        self,
+        name: str,
+        description: str,
+        is_system: bool = False,
+        privilege_names: Optional[List[str]] = None,
     ) -> Role:
-        """Create a new role."""
-        role = Role(name=name, description=description, is_system=is_system)
+        """Create a new role, optionally attaching an initial set of privileges."""
+        resolved = []
+        for priv_name in privilege_names or []:
+            privilege = await self.get_privilege_by_name(priv_name)
+            if privilege is None:
+                raise ValueError(f"Privilege '{priv_name}' does not exist")
+            resolved.append(privilege)
+
+        role = Role(
+            name=name, description=description, is_system=is_system, privileges=resolved
+        )
         self.db.add(role)
         await self.db.commit()
-        await self.db.refresh(role)
+        await self.db.refresh(role, attribute_names=["id", "uuid", "created_at"])
         logger.info(f"Created role: {name}")
         return role
 
