@@ -3,7 +3,9 @@ Unit tests for authentication module.
 """
 
 import pytest
+import pytest_asyncio
 from sqlalchemy import create_engine
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
 from unittest.mock import Mock
 
@@ -98,23 +100,36 @@ def test_create_access_token(mock_context):
     assert len(token) > 0
 
 
-def test_authenticate_user(db_session):
+@pytest_asyncio.fixture
+async def async_db_session():
+    """Async database session fixture — authenticate_user() is async and needs one."""
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(User.metadata.create_all)
+    AsyncSessionLocal = sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
+    async with AsyncSessionLocal() as session:
+        yield session
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_authenticate_user(async_db_session):
     """Test user authentication."""
     password = "testpass"
     hashed = get_password_hash(password)
     user = User(username="testuser", email="test@example.com", password_hash=hashed)
-    db_session.add(user)
-    db_session.commit()
+    async_db_session.add(user)
+    await async_db_session.commit()
 
-    auth_user = authenticate_user(db_session, "testuser", password)
+    auth_user = await authenticate_user(async_db_session, "testuser", password)
     assert auth_user is not False
     assert auth_user.username == "testuser"
 
-    auth_user = authenticate_user(db_session, "testuser", "wrongpass")
+    auth_user = await authenticate_user(async_db_session, "testuser", "wrongpass")
     assert auth_user is False
 
     # Test non-existent user
-    auth_user = authenticate_user(db_session, "nonexistent", password)
+    auth_user = await authenticate_user(async_db_session, "nonexistent", password)
     assert auth_user is False
 
 
