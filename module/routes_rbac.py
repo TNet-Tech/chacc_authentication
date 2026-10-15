@@ -29,7 +29,6 @@ router = APIRouter(prefix="/rbac")
 
 # Pydantic models for request/response
 class PrivilegeResponse(BaseModel):
-    id: int
     name: str
     description: str
     severity: str
@@ -39,7 +38,6 @@ class PrivilegeResponse(BaseModel):
 
 
 class RoleResponse(BaseModel):
-    id: int
     name: str
     description: str
     is_system: bool
@@ -49,7 +47,6 @@ class RoleResponse(BaseModel):
 
 
 class RoleWithPrivilegesResponse(BaseModel):
-    id: int
     name: str
     description: str
     is_system: bool
