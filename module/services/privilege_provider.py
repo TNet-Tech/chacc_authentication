@@ -39,7 +39,7 @@ async def _get_redis_client(context) -> Optional[object]:
 
 async def _new_rbac(context):
     """Build an RBACService bound to a fresh DB session + redis (if available)."""
-    db = await anext(context.get_db())
+    db = await anext(context.get_db_async())
     redis_client = await _get_redis_client(context)
     return get_rbac_service(db, redis_client)
 
