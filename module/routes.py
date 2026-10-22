@@ -49,6 +49,15 @@ class UserAdminUpdate(BaseModel):
     password: Optional[str] = None
 
 
+class UserSelfUpdate(BaseModel):
+    username: Optional[str] = None
+    email: Optional[str] = None
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    password: Optional[str] = None
+    passwordConfirm: Optional[str] = None
+
+
 async def _require_write_users(current_user: User, db: Session) -> None:
     """Guard admin user-management endpoints behind WRITE_USERS."""
     redis_client = await get_redis_client()
@@ -128,28 +137,53 @@ async def read_users_me(current_user: User = Depends(get_current_user_required()
 
 @router.put("/me", response_model=UserResponse)
 async def update_user_me(
-    user_update: UserCreate,
+    user_update: UserSelfUpdate,
     current_user: User = Depends(get_current_user_required()),
     db: AsyncSession = Depends(get_async_db),
 ):
-    current_user.username = user_update.username
-    current_user.email = user_update.email
-    if user_update.first_name:
-        current_user.first_name = user_update.first_name
-    if user_update.last_name:
-        current_user.last_name = user_update.last_name
+    if user_update.password or user_update.passwordConfirm:
+        if user_update.password != user_update.passwordConfirm:
+            raise HTTPException(status_code=400, detail="Passwords should match")
+
+    from sqlalchemy import select
+    result = await db.execute(select(User).where(User.uuid == current_user.uuid))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if user_update.username is not None and user_update.username != user.username:
+        existing = await db.execute(
+            select(User).where(User.username == user_update.username, User.uuid != user.uuid)
+        )
+        if existing.scalar_one_or_none():
+            raise HTTPException(status_code=409, detail="Username already registered")
+        user.username = user_update.username
+
+    if user_update.email is not None and user_update.email != user.email:
+        existing = await db.execute(
+            select(User).where(User.email == user_update.email, User.uuid != user.uuid)
+        )
+        if existing.scalar_one_or_none():
+            raise HTTPException(status_code=409, detail="Email already registered")
+        user.email = user_update.email
+
+    if user_update.first_name is not None:
+        user.first_name = user_update.first_name
+    if user_update.last_name is not None:
+        user.last_name = user_update.last_name
     if user_update.password:
-        current_user.password_hash = get_password_hash(user_update.password)
+        user.password_hash = get_password_hash(user_update.password)
+
     await db.commit()
-    await db.refresh(current_user)
+    await db.refresh(user)
     return UserResponse(
-        uuid=str(current_user.uuid),
-        username=current_user.username,
-        first_name=current_user.first_name,
-        middle_name=current_user.middle_name,
-        last_name=current_user.last_name,
-        email=current_user.email,
-        is_active=current_user.is_active,
+        uuid=str(user.uuid),
+        username=user.username,
+        first_name=user.first_name,
+        middle_name=user.middle_name,
+        last_name=user.last_name,
+        email=user.email,
+        is_active=user.is_active,
     )
 
 
@@ -158,9 +192,13 @@ async def delete_user_me(
     current_user: User = Depends(get_current_user_required()),
     db: AsyncSession = Depends(get_async_db),
 ):
-    from sqlalchemy import delete
-    await db.execute(delete(OAuthSession).where(OAuthSession.user_id == current_user.id))
-    db.delete(current_user)
+    from sqlalchemy import delete, select
+    result = await db.execute(select(User).where(User.uuid == current_user.uuid))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    await db.execute(delete(OAuthSession).where(OAuthSession.user_id == user.id))
+    await db.delete(user)
     await db.commit()
     return {"message": "User deleted"}
 
@@ -271,7 +309,7 @@ async def admin_delete_user(
 
     # Remove dependent login sessions first (FK is NOT NULL, no DB cascade).
     await db.execute(delete(OAuthSession).where(OAuthSession.user_id == user.id))
-    db.delete(user)
+    await db.delete(user)
     await db.commit()
     return {"success": True, "message": "User deleted"}
 
