@@ -8,6 +8,10 @@
   "test_entry_point": "module.tests.test_module:run_module_tests",
   "base_path_prefix": "/authentication",
   "dependencies_file": "requirements.txt",
+  "module_dependencies": {
+    "required": [],
+    "optional": []
+  },
   "required_chacc_version": ">=1.0.0",
   "license": "MIT",
   "tags": [

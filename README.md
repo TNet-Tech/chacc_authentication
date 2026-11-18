@@ -90,9 +90,31 @@ The module uses a context factory to work in different environments:
 - **Production**: Uses provided BackboneContext
 - **Testing**: Minimal context for isolated testing
 
+## Module Dependencies
+
+This module depends on no other ChaCC module (`module_dependencies` in
+`module_meta.json` is empty). Other modules depend on it:
+
+| Module | Kind | Uses |
+| --- | --- | --- |
+| `chacc_menu` | required | `get_current_user`, `privilege_service`, `has_privileges`, and the `users` table (foreign keys) |
+| `chacc_outbound` | optional | `get_current_user` |
+
+chacc-api loads this module before the modules that require it, so its services
+are registered by the time their `setup_plugin` runs.
+
 ## Services Provided
 
-- `get_current_user`: Dependency for protecting routes in other modules which you can get by calling ChaCC `async context.get_service("get_current_user")`
+Get them with `context.get_service("<name>")`. These names are the module's
+public contract: renaming or removing one breaks the modules listed above.
+
+| Service | What it is |
+| --- | --- |
+| `get_current_user` | `async (credentials) -> User \| None`: resolves the user from a Bearer token, for protecting routes in other modules |
+| `UserModel` | The `User` SQLAlchemy model |
+| `get_password_hash` | Hashes a plain-text password |
+| `privilege_service` | `PrivilegeService`: modules register their own privileges with `await privilege_service.ensure([(name, description, level), ...])` |
+| `has_privileges` | `async (credentials, privilege_names, *, require_all=False) -> User`: raises 401/403 when the user lacks the privileges |
 
 ## Dependencies
 
