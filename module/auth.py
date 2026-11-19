@@ -12,7 +12,7 @@ from argon2.exceptions import VerifyMismatchError, HashingError
 from sqlalchemy import select
 
 from chacc_authentication.module.models.user import User
-from chacc_authentication.module.context_factory import get_module_context
+from chacc_authentication.module.context_factory import async_session, get_module_context
 
 ph = PasswordHasher()
 
@@ -88,9 +88,6 @@ async def get_current_user(
     if not credentials:
         return None
 
-    db_gen = context.get_db_async()
-    db = await anext(db_gen)
-
     try:
         payload = jwt.decode(
             credentials.credentials, SECRET_KEY, algorithms=[ALGORITHM]
@@ -102,15 +99,11 @@ async def get_current_user(
         return None
 
     try:
-        result = await db.execute(select(User).filter(User.username == username))
-        user = result.scalar_one_or_none()
-        if user is None:
-            return None
-        return user
+        async with async_session(context) as db:
+            result = await db.execute(select(User).filter(User.username == username))
+            return result.scalar_one_or_none()
     except Exception:
         return None
-    finally:
-        await db.close()
 
 
 def get_current_user_required():

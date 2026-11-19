@@ -28,6 +28,13 @@ from chacc_authentication.module.auth import create_access_token
 logger = logging.getLogger(__name__)
 
 
+def _expired(expires_at: datetime) -> bool:
+    """Whether a session's expiry has passed. Stored times without a zone are UTC."""
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    return expires_at <= datetime.now(timezone.utc)
+
+
 class OAuth2Service:
     """
     OAuth2 Service with Hybrid DB/Redis Fallback.
@@ -49,9 +56,13 @@ class OAuth2Service:
         expires_delta: timedelta = timedelta(minutes=30),
         device_info: Optional[str] = None,
         ip_address: Optional[str] = None,
+        refresh_expires_delta: Optional[timedelta] = None,
     ) -> tuple[str, str, str]:
         """
         Create a new OAuth2 session with refresh token.
+
+        expires_delta is the access token's lifetime; refresh_expires_delta is
+        the session's (the refresh token's), and defaults to expires_delta.
 
         Returns:
             tuple: (access_token, refresh_token, session_uuid)
@@ -62,7 +73,8 @@ class OAuth2Service:
 
         refresh_token_id = str(uuid.uuid4())
         family_id = str(uuid.uuid4())
-        expires_at = datetime.now(timezone.utc) + expires_delta
+        session_delta = refresh_expires_delta or expires_delta
+        expires_at = datetime.now(timezone.utc) + session_delta
 
         oauth_session = OAuthSession(
             user_id=user.id,
@@ -88,7 +100,7 @@ class OAuth2Service:
                 }
                 await redis_client.setex(
                     f"refresh_token:{refresh_token_id}",
-                    int(expires_delta.total_seconds()),
+                    int(session_delta.total_seconds()),
                     json.dumps(cache_data),
                 )
             except Exception as e:
@@ -126,7 +138,7 @@ class OAuth2Service:
                         select(OAuthSession).filter(OAuthSession.refresh_token_id == refresh_token_id)
                     )
                     session = result.scalar_one_or_none()
-                    if session and session.expires_at > datetime.now(timezone.utc):
+                    if session and not _expired(session.expires_at):
                         return session
             except Exception as e:
                 logger.warning(
@@ -141,7 +153,7 @@ class OAuth2Service:
         if not session:
             return None
 
-        if session.is_rotated or session.expires_at <= datetime.now(timezone.utc):
+        if session.is_rotated or _expired(session.expires_at):
             return None
 
         return session
@@ -152,11 +164,13 @@ class OAuth2Service:
         new_expires_delta: timedelta = timedelta(minutes=30),
         device_info: Optional[str] = None,
         ip_address: Optional[str] = None,
+        new_refresh_expires_delta: Optional[timedelta] = None,
     ) -> Optional[tuple[str, str, str]]:
         """
         Rotate a refresh token.
 
-        Marks old token as rotated in DB and creates a new session.
+        Marks old token as rotated in DB and creates a new session. An expired
+        token isn't rotated.
         DB is the source of truth - Redis cache cleanup is attempted but not required.
 
         Returns:
@@ -172,7 +186,7 @@ class OAuth2Service:
         )
         old_session = result.scalar_one_or_none()
 
-        if not old_session or old_session.is_rotated:
+        if not old_session or old_session.is_rotated or _expired(old_session.expires_at):
             return None
 
         old_session.is_rotated = True
@@ -191,6 +205,7 @@ class OAuth2Service:
             expires_delta=new_expires_delta,
             device_info=device_info,
             ip_address=ip_address,
+            refresh_expires_delta=new_refresh_expires_delta,
         )
 
         redis_client = self._get_redis_client()

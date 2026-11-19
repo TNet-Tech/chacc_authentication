@@ -131,6 +131,7 @@ async def login_user(
         expires_delta=expires_delta,
         device_info=device_info,
         ip_address=ip_address,
+        refresh_expires_delta=timedelta(minutes=refresh_token_expire_minutes),
     )
 
     refresh_token_expiry = refresh_token_expire_minutes * 60
@@ -175,6 +176,7 @@ async def refresh_token(
         new_expires_delta=expires_delta,
         device_info=device_info,
         ip_address=ip_address,
+        new_refresh_expires_delta=timedelta(minutes=refresh_token_expire_minutes),
     )
 
     if result is None:

@@ -52,6 +52,8 @@ The module will be available at `http://localhost:8001/auth/`
 # -----------------------------------------------------------------
 - `AUTHENTICATION_DEFAULT_ADMIN_USERNAME`: set username for automatic created account
 - `AUTHENTICATION_DEFAULT_ADMIN_PASSWORD`: set password for automatic created account
+- `AUTHENTICATION_ACCESS_TOKEN_EXPIRE_MINUTES`: access token lifetime in minutes (default 10)
+- `AUTHENTICATION_REFRESH_TOKEN_EXPIRE_MINUTES`: refresh token lifetime in minutes (default 15)
 
 
 ## API Endpoints

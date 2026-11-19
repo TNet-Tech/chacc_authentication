@@ -18,11 +18,12 @@ Both helpers manage their own database session via the authentication module
 context, so callers never need direct DB or model access.
 """
 
+from contextlib import asynccontextmanager
 from typing import List, Optional
 
 from fastapi import HTTPException, status
 
-from chacc_authentication.module.context_factory import get_module_context
+from chacc_authentication.module.context_factory import async_session, get_module_context
 from chacc_authentication.module.services.rbac_service import get_rbac_service
 
 
@@ -37,11 +38,14 @@ async def _get_redis_client(context) -> Optional[object]:
         return None
 
 
-async def _new_rbac(context):
-    """Build an RBACService bound to a fresh DB session + redis (if available)."""
-    db = await anext(context.get_db_async())
-    redis_client = await _get_redis_client(context)
-    return get_rbac_service(db, redis_client)
+@asynccontextmanager
+async def _rbac(context):
+    """An RBACService on a fresh DB session (+ redis if available), closed after the block.
+
+    Results must be read inside the block: the session is closed afterwards.
+    """
+    async with async_session(context) as db:
+        yield get_rbac_service(db, await _get_redis_client(context))
 
 
 class PrivilegeService:
@@ -60,22 +64,22 @@ class PrivilegeService:
         return self._context or get_module_context()
 
     async def list(self) -> List[dict]:
-        rbac = await _new_rbac(self._ctx())
-        return [_to_dict(p) for p in await rbac.get_all_privileges()]
+        async with _rbac(self._ctx()) as rbac:
+            return [_to_dict(p) for p in await rbac.get_all_privileges()]
 
     async def get(self, name: str) -> Optional[dict]:
-        rbac = await _new_rbac(self._ctx())
-        privilege = await rbac.get_privilege_by_name(name)
-        return _to_dict(privilege) if privilege else None
+        async with _rbac(self._ctx()) as rbac:
+            privilege = await rbac.get_privilege_by_name(name)
+            return _to_dict(privilege) if privilege else None
 
     async def create(
         self, name: str, description: str, severity: str = "MEDIUM"
     ) -> dict:
-        rbac = await _new_rbac(self._ctx())
-        existing = await rbac.get_privilege_by_name(name)
-        if existing:
-            raise ValueError(f"Privilege '{name}' already exists")
-        return _to_dict(await rbac.create_privilege(name, description, severity))
+        async with _rbac(self._ctx()) as rbac:
+            existing = await rbac.get_privilege_by_name(name)
+            if existing:
+                raise ValueError(f"Privilege '{name}' already exists")
+            return _to_dict(await rbac.create_privilege(name, description, severity))
 
     async def ensure(
         self, privileges: List[tuple[str, str, str]]
@@ -89,18 +93,18 @@ class PrivilegeService:
             List of privilege dicts for all requested privileges.
         """
         names = [name for name, _, _ in privileges]
-        rbac = await _new_rbac(self._ctx())
-        existing = await rbac.get_privileges_by_names(names)
-        existing_by_name = {p.name: p for p in existing}
+        async with _rbac(self._ctx()) as rbac:
+            existing = await rbac.get_privileges_by_names(names)
+            existing_by_name = {p.name: p for p in existing}
 
-        results = []
-        for name, description, severity in privileges:
-            if name in existing_by_name:
-                results.append(_to_dict(existing_by_name[name]))
-            else:
-                created = await rbac.create_privilege(name, description, severity)
-                results.append(_to_dict(created))
-        return results
+            results = []
+            for name, description, severity in privileges:
+                if name in existing_by_name:
+                    results.append(_to_dict(existing_by_name[name]))
+                else:
+                    created = await rbac.create_privilege(name, description, severity)
+                    results.append(_to_dict(created))
+            return results
 
     async def update(
         self,
@@ -108,13 +112,13 @@ class PrivilegeService:
         description: Optional[str] = None,
         severity: Optional[str] = None,
     ) -> Optional[dict]:
-        rbac = await _new_rbac(self._ctx())
-        updated = await rbac.update_privilege(name, description, severity)
-        return _to_dict(updated) if updated else None
+        async with _rbac(self._ctx()) as rbac:
+            updated = await rbac.update_privilege(name, description, severity)
+            return _to_dict(updated) if updated else None
 
     async def delete(self, name: str) -> bool:
-        rbac = await _new_rbac(self._ctx())
-        return await rbac.delete_privilege(name)
+        async with _rbac(self._ctx()) as rbac:
+            return await rbac.delete_privilege(name)
 
 
 def _to_dict(privilege) -> dict:
@@ -158,15 +162,15 @@ async def has_privileges(
     if not privilege_names:
         return user
 
-    rbac = await _new_rbac(get_module_context())
-    if require_all:
-        granted = True
-        for name in privilege_names:
-            if not await rbac.has_privilege(user.id, name):
-                granted = False
-                break
-    else:
-        granted = await rbac.has_any_privilege(user.id, privilege_names)
+    async with _rbac(get_module_context()) as rbac:
+        if require_all:
+            granted = True
+            for name in privilege_names:
+                if not await rbac.has_privilege(user.id, name):
+                    granted = False
+                    break
+        else:
+            granted = await rbac.has_any_privilege(user.id, privilege_names)
 
     if not granted:
         raise HTTPException(

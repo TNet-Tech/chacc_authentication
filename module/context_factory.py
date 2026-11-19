@@ -3,6 +3,7 @@ Context factory for providing BackboneContext in different environments.
 """
 
 import os
+from contextlib import asynccontextmanager
 from typing import Optional
 
 from fastapi import HTTPException
@@ -64,11 +65,49 @@ def get_context(context: Optional[BackboneContext] = None) -> BackboneContext:
 
 
 async def get_db():
-    """Get database session from module context."""
+    """Route dependency: a sync database session, closed after the request.
+
+    Kept as a generator so the backbone's session generator is closed here, in
+    the request's own task. Returning ``await anext(...)`` instead dropped the
+    generator, and Python then closed it later from another task, possibly while
+    the route was still using the session.
+    """
     context: BackboneContext = get_module_context()
     if context is None:
         raise HTTPException(status_code=500, detail="Module not initialized")
-    return await anext(context.get_db())
+
+    gen = context.get_db()
+    db = await anext(gen)
+    try:
+        yield db
+    finally:
+        await gen.aclose()
+
+
+@asynccontextmanager
+async def async_session(context: Optional[BackboneContext] = None):
+    """An async database session for code outside routes, closed when the block ends.
+
+        async with async_session() as db:
+            user = (await db.execute(select(User))).scalar_one_or_none()
+
+    Don't take a session with ``await anext(context.get_db_async())``: the
+    generator is dropped, and Python closes it later from another task. That
+    closes the session while it is still in use ("CLOSE FAILED: ... is already
+    in progress") and leaves its connection checked out, until the pool runs
+    dry. Here the generator is closed in the same task. Closing the session
+    rolls back anything not committed.
+    """
+    context = context or get_module_context()
+    if context is None:
+        raise RuntimeError("The authentication module is not initialized.")
+
+    gen = context.get_db_async()
+    db = await anext(gen)
+    try:
+        yield db
+    finally:
+        await gen.aclose()
 
 
 async def get_async_db():
